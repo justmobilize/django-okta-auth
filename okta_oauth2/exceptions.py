@@ -42,12 +42,6 @@ class TokenTooFarAway(InvalidToken):
     pass
 
 
-class NonceDoesNotMatch(InvalidToken):
-    """Token nonce does not match expected nonce"""
-
-    pass
-
-
 class TokenRequestFailed(DjangoOktaAuthException):
     """The request to the token api endpoint has failed."""
 

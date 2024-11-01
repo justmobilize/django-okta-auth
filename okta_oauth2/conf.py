@@ -27,6 +27,8 @@ class Config:
             self.manage_groups = settings.OKTA_AUTH.get("MANAGE_GROUPS", False)
             # Timeout in seconds for requests to Okta
             self.request_timeout = settings.OKTA_AUTH.get("REQUEST_TIMEOUT", 10)
+            # Callable to rename a group
+            self.group_rename = settings.OKTA_AUTH.get("GROUP_RENAME", None)
 
             # OpenID Specific
             self.client_id = settings.OKTA_AUTH["CLIENT_ID"]
@@ -38,12 +40,23 @@ class Config:
             self.redirect_uri = settings.OKTA_AUTH["REDIRECT_URI"]
             self.login_redirect_url = settings.OKTA_AUTH.get("LOGIN_REDIRECT_URL", "/")
 
+            # OKTA mode
+            self.use_classic_engine = settings.OKTA_AUTH.get(
+                "USE_CLASSIC_ENGINE", False
+            )
+
             # Django Specific
             self.cache_prefix = settings.OKTA_AUTH.get("CACHE_PREFIX", "okta")
             self.cache_alias = settings.OKTA_AUTH.get("CACHE_ALIAS", "default")
             self.cache_timeout = settings.OKTA_AUTH.get("CACHE_TIMEOUT", 600)
             self.use_username = settings.OKTA_AUTH.get("USE_USERNAME", False)
             self.public_urls = self.build_public_urls()
+
+            # Django Template
+            self.include_admin_template_vars = settings.OKTA_AUTH.get(
+                "INCLUDE_ADMIN_TEMPLATE_VARS", False
+            )
+
         except (AttributeError, KeyError):
             raise ImproperlyConfigured("Missing Okta authentication settings")
 
