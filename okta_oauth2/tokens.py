@@ -21,7 +21,6 @@ from .exceptions import (
     InvalidTokenSignature,
     IssuerDoesNotMatch,
     MissingAuthTokens,
-    NonceDoesNotMatch,
     TokenExpired,
     TokenRequestFailed,
     TokenTooFarAway,
@@ -48,12 +47,11 @@ class DiscoveryDocument:
 class TokenValidator:
     _discovery_document = None
 
-    def __init__(self, config, nonce, request):
+    def __init__(self, config, request):
         self.config = config
         self.cache = caches[config.cache_alias]
         self.cache_key = "{}-keys".format(config.cache_prefix)
         self.request = request
-        self.nonce = nonce
 
     @property
     def discovery_document(self):
@@ -63,6 +61,16 @@ class TokenValidator:
 
     def tokens_from_auth_code(self, code):
         data = {"grant_type": "authorization_code", "code": str(code)}
+
+        result = self.call_token_endpoint(data)
+        return self.handle_token_result(result)
+
+    def tokens_from_auth_interaction_code(self, interaction_code, code_verifier):
+        data = {
+            "grant_type": "interaction_code",
+            "interaction_code": interaction_code,
+            "code_verifier": code_verifier,
+        }
 
         result = self.call_token_endpoint(data)
         return self.handle_token_result(result)
@@ -326,28 +334,15 @@ class TokenValidator:
         if decoded_token["iat"] < (int(time.time()) - 100000):
             """Step 10 - Defined 'too far away time' : approx 24hrs
             The iat can be used to reject tokens that were issued too far away
-            from current time, limiting the time that nonces need to be stored
-            to prevent attacks.
+            from current time.
             """
             raise TokenTooFarAway("iat too far in the past ( > 1 day)")
 
-        if self.nonce is not None and "nonce" in decoded_token:
-            """Step 11
-            If a nonce value is sent in the Authentication Request,
-            a nonce MUST be present and be the same value as the one
-            sent in the Authentication Request. Client SHOULD check for
-            nonce value to prevent replay attacks.
-            """
-            if self.nonce != decoded_token["nonce"]:
-                raise NonceDoesNotMatch(
-                    "nonce value does not match Authentication Request nonce"
-                )
-
-        """ Step 12:  Not implemented by Okta
+        """ Step 11:  Not implemented by Okta
             If acr was requested, check that the asserted Claim Value is appropriate
         """
 
-        """ Step 13
+        """ Step 12
             If auth_time was requested, check claim value and request
             re-authentication if too much time elapsed
 
@@ -374,20 +369,13 @@ def validate_tokens(config: Config, request: HttpRequest):
         raise MissingAuthTokens("Tokens missing from the session")
 
     try:
-        nonce = request.COOKIES["okta-oauth-nonce"]
-    except KeyError:
-        # If we don't have a nonce in the cookie then we can't
-        # validate the token, so just raise an invalid token here.
-        raise InvalidToken("Missing nonce in cookie")
-
-    try:
-        validator = TokenValidator(config, nonce, request)
+        validator = TokenValidator(config, request)
         # If we don't raise an exception we assume that we've got a valid token
         validator.validate_token(request.session["tokens"]["id_token"])
     except TokenExpired:
         # Check for a refresh token, to refresh the authentication automatically.
         if "refresh_token" in request.session["tokens"]:
-            validator = TokenValidator(config, None, request)
+            validator = TokenValidator(config, request)
             # If we don't raise an exception we assume that we've got a valid token
             validator.tokens_from_refresh_token(
                 request.session["tokens"]["refresh_token"]

@@ -1,18 +1,21 @@
 import logging
 
-from django.contrib import messages
+from django.contrib import admin
 from django.contrib.auth import authenticate, login as auth_login, logout as auth_logout
-from django.contrib.messages.api import MessageFailure
-from django.http import (
-    HttpResponseBadRequest,
-    HttpResponseRedirect,
-    HttpResponseServerError,
-)
+from django.http import HttpResponseBadRequest, HttpResponseRedirect
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.urls.exceptions import NoReverseMatch
 
 from .conf import Config
+from .utils import (
+    create_code_challenge,
+    create_code_verifier,
+    create_state,
+    get_state,
+    return_error,
+    set_state,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -20,18 +23,41 @@ logger = logging.getLogger(__name__)
 def login(request):
     config = Config()
 
+    state = create_state()
+    state_data = {"valid": True}
+
     okta_config = {
         "clientId": config.client_id,
-        "url": config.org_url,
+        "issuer": config.issuer,
         "redirectUri": str(config.redirect_uri),
         "scope": config.scopes,
-        "issuer": config.issuer,
+        "state": state,
+        "url": config.org_url,
+        "useClassicEngine": config.use_classic_engine,
     }
-    response = render(request, "okta_oauth2/login.html", {"config": okta_config})
+    if not config.use_classic_engine:
+        code_verifier = create_code_verifier()
+        code_challenge = create_code_challenge(code_verifier)
+        state_data["code_verifier"] = code_verifier
+        okta_config["codeChallenge"] = code_challenge
 
-    _delete_cookies(response)
+    set_state(config, state, state_data)
 
-    return response
+    context = {
+        "config": okta_config,
+    }
+
+    if config.include_admin_template_vars:
+        context.update(
+            {
+                "site_header": admin.site.site_header,
+                "site_title": admin.site.site_title,
+                "admin_login": reverse("admin:login"),
+                "title": "Log In",
+            }
+        )
+
+    return render(request, "okta_oauth2/login.html", context)
 
 
 def callback(request):
@@ -40,33 +66,31 @@ def callback(request):
     if request.method == "POST":
         return HttpResponseBadRequest("Method not supported")
 
+    error_description = None
     if "error" in request.GET:
         error_description = request.GET.get(
             "error_description", "An unknown error occurred."
         )
-        try:
-            messages.error(request, error_description)
-        except MessageFailure:
-            return HttpResponseServerError(error_description)
-        return HttpResponseRedirect(reverse("okta_oauth2:login"))
+        return return_error(request, error_description)
 
-    code = request.GET["code"]
     state = request.GET["state"]
+    state_data = get_state(config, state)
+    if not isinstance(state_data, dict) or not state_data["valid"] is True:
+        error_description = "Unknown state, please try again"
+        return return_error(request, error_description)
 
-    # Get state and nonce from cookie
-    cookie_state = request.COOKIES["okta-oauth-state"]
-    cookie_nonce = request.COOKIES["okta-oauth-nonce"]
-
-    # Verify state
-    if state != cookie_state:
-        return HttpResponseBadRequest(
-            "Value {} does not match the assigned state".format(state)
+    if config.use_classic_engine:
+        code = request.GET["code"]
+        user = authenticate(request, code=code)
+    else:
+        interaction_code = request.GET["interaction_code"]
+        code_verifier = state_data["code_verifier"]
+        user = authenticate(
+            request, interaction_code=interaction_code, code_verifier=code_verifier
         )
 
-    user = authenticate(request, auth_code=code, nonce=cookie_nonce)
-
     if user is None:
-        return redirect(reverse("okta_oauth2:login"))
+        return return_error(request, error_description)
 
     auth_login(request, user)
 
@@ -81,11 +105,3 @@ def callback(request):
 def logout(request):
     auth_logout(request)
     return HttpResponseRedirect(reverse("okta_oauth2:login"))
-
-
-def _delete_cookies(response):
-    # The Okta Signin Widget/Javascript SDK aka "Auth-JS" automatically generates
-    # state and nonce and stores them in cookies. Delete authJS/widget cookies
-    response.delete_cookie("okta-oauth-state")
-    response.delete_cookie("okta-oauth-nonce")
-    response.delete_cookie("okta-oauth-redirect-params")

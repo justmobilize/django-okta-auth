@@ -19,12 +19,21 @@ class OktaBackend(ModelBackend):
     and get the user from the Django database.
     """
 
-    def authenticate(self, request, auth_code=None, nonce=None):
-        if auth_code is None or nonce is None:
+    def authenticate(
+        self, request, code=None, interaction_code=None, code_verifier=None, **kwargs
+    ):
+        if code is None and interaction_code is None:
+            return
+        if interaction_code and code_verifier is None:
             return
 
-        validator = TokenValidator(config, nonce, request)
-        user, tokens = validator.tokens_from_auth_code(auth_code)
+        validator = TokenValidator(config, request)
+        if interaction_code:
+            user, tokens = validator.tokens_from_auth_interaction_code(
+                interaction_code, code_verifier
+            )
+        else:
+            user, tokens = validator.tokens_from_auth_code(code)
 
         if self.user_can_authenticate(user):
             return user
