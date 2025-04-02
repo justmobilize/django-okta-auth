@@ -49,6 +49,7 @@ class Config:
             self.cache_prefix = settings.OKTA_AUTH.get("CACHE_PREFIX", "okta")
             self.cache_alias = settings.OKTA_AUTH.get("CACHE_ALIAS", "default")
             self.cache_timeout = settings.OKTA_AUTH.get("CACHE_TIMEOUT", 600)
+            self.use_names = settings.OKTA_AUTH.get("USE_NAMES", False)
             self.use_username = settings.OKTA_AUTH.get("USE_USERNAME", False)
             self.public_urls = self.build_public_urls()
 
