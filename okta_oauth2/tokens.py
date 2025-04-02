@@ -110,19 +110,22 @@ class TokenValidator:
         if claims:
             tokens["id_token"] = token_result["id_token"]
             tokens["claims"] = claims
-            username = claims["email"]
+
+            username = email = claims["email"].lower()
             if self.config.use_username:
-                last_at = claims["email"].rfind("@")
-                username = claims["email"][:last_at]
+                last_at = username.rfind("@")
+                username = username[:last_at]
 
             try:
                 user = UserModel._default_manager.get_by_natural_key(username)
             except UserModel.DoesNotExist:
                 user = UserModel._default_manager.create_user(
-                    username=username, email=claims["email"]
+                    username=username, email=email
                 )
 
+            update_fields = []
             if self.config.superuser_group:
+                update_fields.append("is_superuser")
                 user.is_superuser = bool(
                     self.config.superuser_group
                     and "groups" in claims
@@ -130,13 +133,32 @@ class TokenValidator:
                 )
 
             if self.config.staff_group:
+                update_fields.append("is_staff")
                 user.is_staff = bool(
                     self.config.staff_group
                     and "groups" in claims
                     and self.config.staff_group in claims["groups"]
                 )
 
-            user.save()
+            if self.config.use_names:
+                given_name = claims.get("given_name")
+                family_name = claims.get("family_name")
+                if not given_name and not family_name:
+                    name = claims.get("name")
+                    names = name.split(" ")
+                    if len(names) == 1:
+                        given_name = name
+                    if len(names) > 1:
+                        given_name = " ".join(names[:-1])
+                        family_name = names[-1]
+                if given_name:
+                    update_fields.append("first_name")
+                    user.first_name = given_name
+                if family_name:
+                    update_fields.append("last_name")
+                    user.last_name = family_name
+
+            user.save(update_fields=update_fields)
 
             if self.config.manage_groups:
                 self.manage_groups(user, claims["groups"])
