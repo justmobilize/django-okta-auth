@@ -2,6 +2,7 @@ import base64
 import logging
 import time
 from typing import Optional
+from urllib.parse import quote_plus
 
 import jwt as jwt_python
 import requests
@@ -105,7 +106,9 @@ class TokenValidator:
             claims = self.validate_token(token_result["id_token"])
 
         if "groups" in claims and self.config.group_rename:
-            claims["groups"] = [self.config.group_rename(group) for group in claims["groups"]]
+            claims["groups"] = [
+                self.config.group_rename(group) for group in claims["groups"]
+            ]
 
         if claims:
             tokens["id_token"] = token_result["id_token"]
@@ -410,7 +413,7 @@ def validate_tokens(config: Config, request: HttpRequest):
 
 
 def validate_or_redirect(
-    config: Config, request: HttpRequest, add_next: bool=False
+    config: Config, request: HttpRequest, add_next: bool = False
 ) -> Optional[HttpResponse]:
     """Take a config and a request. If tokens dont' validate,
     return the appropriate HttpResponse, otherwise return None"""
@@ -434,7 +437,7 @@ def validate_or_redirect(
     if redirect:
         redirect_url = reverse("okta_oauth2:login")
         if add_next:
-            redirect_url += f"?next={request.path_info}"
+            redirect_url += f"?next={quote_plus(request.get_full_path())}"
         return HttpResponseRedirect(redirect_url)
 
     return None
